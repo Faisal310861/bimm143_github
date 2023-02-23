@@ -1,0 +1,280 @@
+---
+title: "class 12"
+author: "Faisal"
+format: pdf
+---
+
+#Import Data
+
+```{r}
+counts <- read.csv("airway_scaledcounts.csv", row.names=1)
+metadata <-  read.csv("airway_metadata.csv")
+head(counts)
+```
+
+>Q1 How many genes are in this dataset? 
+
+```{r}
+nrow(counts)
+```
+
+> Q2 How many ‘control’ cell lines do we have?
+
+```{r}
+ncol(counts)
+```
+
+and the metadataaka "colData"
+
+```{r}
+(metadata)
+```
+
+
+
+Lets make sure that the id column of the metadatamatch the order of the columns in CountData.
+
+```{r}
+metadata$id== colnames(counts)
+```
+
+We can use the 'all() function to check that all its input are TRUE
+
+```{r}
+all( c(T,T,T, F))
+```
+```{r}
+all( metadata$id== colnames(counts))
+```
+
+
+# Analysis by hand
+
+```{r}
+metadata
+```
+
+Lets first extract our counts for control samples to compare this to the count for treated (i.e with drug) samples
+
+> Q3. How would you make the above code in either approach more robust?
+
+```{r}
+control.inds <- metadata$dex == "control"
+control.ids <- metadata$id[ control.inds]
+control.counts <- counts[, control.ids ]
+control.mean <- rowMeans(control.counts)
+head(control.counts)
+```
+
+
+
+
+
+I want a single summary counts value for each gene in the control experiments. I will start by taking the average
+
+>Q4. Follow the same procedure for the treated samples (i.e. calculate the mean per gene across drug treated samples and assign to a labeled vector called treated.mean)
+
+```{r}
+##apply(control.counts, 1, mean)
+treated.mean <- rowMeans(control.counts)
+treated.inds <- metadata$dex == "treated"
+treated.ids <- metadata$id[ control.inds]
+treated.counts = counts[, treated.ids ]
+head(treated.counts)
+treated.mean = rowMeans(treated.counts)
+```
+
+Now we do the same for the treated samples Please :-)
+
+```{r}
+meancounts <- data.frame(control.mean, treated.mean)
+head(meancounts)
+```
+
+and make a wee plot to see how we are doing
+
+ >Q5 Create a scatter plot showing the mean of the treated samples against the mean of the control samples. Your plot should look something like the following.
+ 
+```{r}
+plot(meancounts$control.mean, meancounts$treated.mean)
+```
+
+This screams for a log transformation so we can see our data
+
+> Q6 Try plotting both axes on a log scale. What is the argument to plot() that allows you to do this?
+
+```{r}
+plot(meancounts$control.mean, meancounts$treated.mean, log="xy")
+```
+
+
+The most useful and most straightforward to understand is log2 transformation
+
+```{r}
+log2(20/20)
+```
+
+
+Doubling
+```{r}
+log2(40/20)
+```
+
+```{r}
+log2(10/20)
+```
+
+add a "log2 fold-change"
+
+```{r}
+meancounts$log2fc <- log2(meancounts$treated.mean / meancounts$control.mean)
+```
+
+```{r}
+head(meancounts)
+```
+
+
+Hmmm... we need to get rid of the genes where we have no count data as taking the log2 of these 0 counts does not tell us anything. 
+
+
+```{r}
+head( meancounts == 0)
+```
+
+```{r}
+to.keep <- rowSums(meancounts[,1:2] == 0) == 0
+
+mycounts <- meancounts[to.keep,]
+head(mycounts)
+```
+
+> Q7. What is the purpose of the arr.ind argument in the which() function call above? Why would we then take the first column of the output and need to call the unique() function?
+
+it returns the true value.. we use the unique value because we don't need the position that has 2 trees, which is repeated. 
+
+How many genes are up regulated at the log2fc level of +2
+
+> Q8. Using the up.ind vector above can you determine how many up regulated genes we have at the greater than 2 fc level?
+
+```{r}
+sum(mycounts$log2fc >= +2)
+```
+
+
+> Q9. Using the down.ind vector above can you determine how many down regulated genes we have at the greater than 2 fc level? 
+
+and down regulated...
+
+```{r}
+sum(mycounts$log2fc <= -2)
+```
+
+>Q10
+No we dont trust these results because we dont know if the numbers are significant
+
+We are missing the stats.. 
+
+# DESeq2 analysis
+
+```{r}
+#| message: false
+library(DESeq2)
+```
+
+Like most bioconductor packages DESeq wants its input and output in a very specific format
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData=counts, 
+                              colData=metadata, 
+                              design=~dex)
+dds
+```
+The main DESeq function is called DESeq
+```{r}
+dds <- DESeq(dds)
+
+```
+
+```{r}
+res <- results(dds)
+head(res)
+```
+
+
+
+
+# Volcano plots
+
+A major summary figure of this type of analysis is called a volcano plot - the idea here is to keep our inner biologist and inner stats person happy with one cool plot
+
+```{r}
+plot( res$log2FoldChange, res$padj)
+```
+
+
+Improve this plot by taking the log of that p-value axis
+
+```{r}
+plot( res$log2FoldChange,  log(res$padj) )
+```
+
+I want to flip this y-axis so that the value i care about are at the top of the axis 
+
+```{r}
+plot( res$log2FoldChange,  -log(res$padj), 
+      xlab="Log2(FoldChange)",
+      ylab="-Log(P-value)")
+
+```
+
+
+# gene annotation
+
+
+```{r}
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+```
+
+```{r}
+columns(org.Hs.eg.db)
+
+```
+
+#Pathway anaylyysis
+```{r}
+library(pathview)
+library(gage)
+library(gageData)
+
+data("kegg.sets.hs")
+
+#examine the first 2 pathways in this keggg set for human
+
+head(kegg.sets.hs, 2)
+```
+
+```{r}
+c(barry=4, clair=3, chandra=2)
+
+foldchanges = res$log2FoldChange
+names(foldchanges) = res$entrez
+head(foldchanges)
+```
+
+```{r}
+keggres = gage(foldchanges, gsets=kegg.sets.hs)
+attributes(keggres)
+head(keggres$less, 3)
+
+```
+```{r}
+pathview(gene.data=foldchanges, pathway.id="hsa05310")
+
+```
+
+I put this in the document
+![The asthma pathway with my highlighted differntally expressed gene in color](hsa05310.pathview.png)
+
+
